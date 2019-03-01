@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<head>
+  <script src="script/d3.v5.min.js"></script>
+  <script src="script/d3-dispatch.v1.min.js"></script>
+  <script src="script/d3-quadtree.v1.min.js"></script>
+  <script src="script/d3-timer.v1.min.js"></script>
+  <script src="script/d3-force.v2.min.js"></script>
+
+  <title>Wireless Device Scanner</title>
+  <style>
+    html {
+      background-color: #222;
+    }
+    body {
+      margin: 0;
+    }
+
+    .disp-box {
+      background-color: black;
+      padding: 1em;
+      color: white;
+    }
+    #log {
+      color: red;
+    }
+    #log[data-active*="true"] {
+      color: lime;
+    }
+    #graph {
+      text-align: center;
+    }
+  </style>
+</head>
+<pre class="disp-box" id="log"></pre>
+<pre class="disp-box" id="graph"></pre>
+<pre class="disp-box" id="data"></pre>
+<script>
+  const machine = "the spy";
+  let devices = new Map(); 
+  const stdin_re = /(\d+)us.*(\w{2}:\w{2}:\w{2}:\w{2}:\w{2}:\w{2}:\w{2})/;
+  // helper function: log message to screen
+  function log(msg) {
+    document.getElementById('log').textContent += msg + '\n';
+  }
+
+  function setScanState(on) {
+    const status = document.getElementById('log');
+    if (on) {
+      status.textContent =  'WIRELESS SCANNING ENABLED';
+      status.dataset.active = true;
+    } else {
+      status.textContent = 'WIRELESS SCANNING DISABLED';
+      status.dataset.active = false;
+    }
+  }
+  function updateData(update_sim) {
+    const el = document.getElementById('data');
+    el.textContent = "";
+    for (const [mac, data] of devices) {
+      el.textContent += `Device: ${mac} | Latency: ${data.latency}us | Last Update: ${data.last_update}\n`;
+    }
+    update_sim(devices);
+  }
+  // setup websocket with callbacks
+  const color = d => {
+    const scale = d3.scaleOrdinal(d3.schemeCategory10);
+    return d => scale(d.group);
+  }
+  const drag = simulation => {
+    
+    function dragstarted(d) {
+      if (!d3.event.active) simulation.alphaTarget(0.3).restart();
+      d.fx = d.x;
+      d.fy = d.y;
+    }
+    
+    function dragged(d) {
+      d.fx = d3.event.x;
+      d.fy = d3.event.y;
+    }
+    
+    function dragended(d) {
+      if (!d3.event.active) simulation.alphaTarget(0);
+      d.fx = null;
+      d.fy = null;
+    }
+    
+    return d3.drag()
+        .on("start", dragstarted)
+        .on("drag", dragged)
+        .on("end", dragended);
+  };
+
+  
+  const chart = (width, height) => {
+    const svg = d3.select("#graph").append("svg").attr("width", width).attr("height", height);
+    const update = data => {
+      const k_dist = Math.min(width, height)/3;
+      const distances = Array.from(data, ([source, info]) => info.latency);
+      const min_dist = Math.min(...distances);
+      const max_dist = Math.max(...distances);
+      const range = Math.max(max_dist - min_dist, 1);
+      const links = Array.from(data, ([source, info]) => Object.create({source: machine, target: source, value: 1, distance: (k_dist/4) + (k_dist * (info.latency-min_dist)/range)}));
+      let nodes = Array.from(data, ([source, info]) => Object.create({id: source, group: 1}));
+      nodes.push(Object.create({id: machine, group: 1}));
+      const simulation = d3.forceSimulation(nodes)
+            .force("link", d3.forceLink(links).id(d => d.id).distance(d => d.distance))
+          .force("charge", d3.forceManyBody())
+          .force("center", d3.forceCenter(width / 2, height / 2));
+      svg.selectAll("*").remove();
+      const link = svg.append("g")
+          .attr("stroke", "#999")
+          .attr("stroke-opacity", 0.6)
+        .selectAll("line")
+        .data(links)
+        .join("line")
+          .attr("stroke-width", d => Math.sqrt(d.value));
+      const node = svg.append("g")
+          .attr("stroke", "#fff")
+          .attr("stroke-width", 1.5)
+        .selectAll("circle")
+        .data(nodes)
+        .join("circle")
+          .attr("r", 5)
+          .attr("fill", color)
+          .call(drag(simulation));
+      const texts = svg.selectAll(".texts")
+          .data(nodes)
+          .enter()
+          .append("text")
+          .attr("fill", "white")
+          .attr("dx", 12)
+          .attr("dy", "0.35em")
+          .text(function(d){ return d.id; });
+//      node.append("text")
+          //.attr("fill", "white")
+ //         .text(d => d.id);
+      simulation.on("tick", () => {
+        link
+            .attr("x1", d => d.source.x)
+            .attr("y1", d => d.source.y)
+            .attr("x2", d => d.target.x)
+            .attr("y2", d => d.target.y);
+
+        node
+            .attr("cx", d => d.x)
+            .attr("cy", d => d.y);
+        texts
+            .attr("x", function(d) { return d.x; })
+            .attr("y", function(d) { return d.y; });
+
+      });
+    }
+
+
+
+
+
+
+
+ //   invalidation.then(() => simulation.stop());
+
+    return update;
+  //  return svg.node();
+  }
+  const width = 960;
+  const height = 600;
+  const sim_update = chart(width, height)
+  var ws = new WebSocket('ws://localhost:8082/');
+  ws.onopen = function() {
+    setScanState(true);
+  };
+  ws.onclose = function() {
+    setScanState(false);
+  };
+  ws.onmessage = function(event) {
+
+    console.log("Message Recieved");
+    const stdin = event.data;
+    if(!stdin.includes("Acknowledgment")) {
+      return;
+    }
+    const matches = stdin_re.exec(stdin);
+    const [_whole, latency, mac, ..._rest] = matches;
+    const curr_time = (new Date()).getTime();
+    devices.set(mac, {latency: parseInt(latency), last_update: curr_time});
+    updateData(sim_update);
+  };
+  //document.getElementById("graph").appendChild();
+</script>
+
