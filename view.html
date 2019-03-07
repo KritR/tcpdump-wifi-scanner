@@ -132,8 +132,8 @@
       const max_dist = Math.max(...distances);
       const range = Math.max(max_dist - min_dist, 1);
       const links = Array.from(data, ([source, info]) => Object.create({source: machine, target: source, value: 1, distance: (k_dist/4) + (k_dist * (info.latency-min_dist)/range)}));
-      let nodes = Array.from(data, ([source, info]) => Object.create({id: source, group: 1}));
-      nodes.push(Object.create({id: machine, group: 1}));
+      let nodes = Array.from(data, ([source, info]) => Object.create({id: source, group: 5}));
+      nodes.push(Object.create({id: machine, group: 2}));
       return [nodes, links];
     }
     const update = data => {
