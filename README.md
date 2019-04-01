@@ -3,4 +3,4 @@ A simple tcpdump based wifi scanner for surrounding devices. Should work on any 
 Uses d3js to render surrounding nodes.
 
 ## Usage
-./run_server.sh
+````./run_server.sh````
